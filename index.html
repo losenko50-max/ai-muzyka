@@ -591,7 +591,15 @@
 
         .список-плейлиста {
             list-style: none;
+            max-height: 320px;
+            overflow-y: auto;
+            padding-right: 6px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--золото-тусклое) transparent;
         }
+        .список-плейлиста::-webkit-scrollbar { width: 6px; }
+        .список-плейлиста::-webkit-scrollbar-thumb { background: var(--золото-тусклое); border-radius: 3px; }
+        .список-плейлиста::-webkit-scrollbar-track { background: transparent; }
 
         .элемент-плейлиста {
             padding: 12px 14px;
@@ -1604,6 +1612,15 @@
                 // Локальные треки (загруженные админом в этом браузере) — дополняют список.
                 await загрузитьПлейлистИзХранилища();
                 отрисоватьПлейлист();
+                // Предзагрузка первого трека в плеер (без автоплея) — чтобы сразу было видно название.
+                if (плейлист.length > 0 && текущийИндекс === -1) {
+                    const трек = плейлист[0];
+                    аудио.src = трек.url;
+                    названиеТрека.textContent = трек.название;
+                    имяИсполнителя.textContent = трек.исполнитель || '';
+                    обложкаПлеера.textContent = '♪';
+                    кнопкаВоспроизведения.textContent = '▶';
+                }
             })();
         })();
     </script>
