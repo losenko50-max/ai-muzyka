@@ -1170,8 +1170,18 @@
     <script>
         (function() {
             // ── Константы ──
-            const ПАРОЛЬ_АДМИНА = 'admin123'; // Пароль для входа в админ-панель
+            // Хранится только SHA-256 хэш пароля — сам пароль в исходнике отсутствует.
+            const ХЭШ_ПАРОЛЯ = '10a9798e2c9ad2b572e2e960fdaf716cbf806f7d1cb2a485c5c282bb3106b9ed';
             const КЛЮЧ_ХРАНИЛИЩА = 'aimuzyka_playlist'; // Ключ для localStorage
+
+            // ── Хэширование пароля (Web Crypto API, SHA-256) ──
+            async function хэшироватьСтроку(строка) {
+                const буфер = new TextEncoder().encode(строка);
+                const дайджест = await crypto.subtle.digest('SHA-256', буфер);
+                return Array.from(new Uint8Array(дайджест))
+                    .map(b => b.toString(16).padStart(2, '0'))
+                    .join('');
+            }
 
             // ── Получение элементов DOM ──
             const контейнерЧастиц = document.getElementById('идентификаторЧастиц');
@@ -1443,8 +1453,9 @@
                 }
             });
 
-            кнопкаВхода.addEventListener('click', () => {
-                if (полеПароля.value === ПАРОЛЬ_АДМИНА) {
+            кнопкаВхода.addEventListener('click', async () => {
+                const хэшВвода = await хэшироватьСтроку(полеПароля.value);
+                if (хэшВвода === ХЭШ_ПАРОЛЯ) {
                     админВошёл = true;
                     модальноеОкно.classList.remove('показано');
                     показатьАдминПанель();
