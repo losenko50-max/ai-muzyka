@@ -1584,26 +1584,35 @@
                 }
             });
 
-            // ── Загрузка фото профиля ──
-            полеФото.addEventListener('change', () => {
-                const файл = полеФото.files[0];
+            // ── Загрузка фото профиля (сохраняется в IndexedDB, восстанавливается после обновления) ──
+            function установитьФото(blob) {
+                const url = URL.createObjectURL(blob);
+                фотоИсполнителя.innerHTML = '';
+                const изображение = document.createElement('img');
+                изображение.src = url;
+                изображение.classList.add('изображение-фото');
+                фотоИсполнителя.appendChild(изображение);
+                const поле = document.createElement('input');
+                поле.type = 'file';
+                поле.accept = 'image/*';
+                поле.classList.add('поле-загрузки-фото');
+                поле.addEventListener('change', () => обработатьФото(поле));
+                фотоИсполнителя.appendChild(поле);
+            }
+
+            async function обработатьФото(поле) {
+                const файл = поле.files[0];
                 if (!файл || !файл.type.startsWith('image/')) return;
-                const читатель = new FileReader();
-                читатель.onload = () => {
-                    const изображение = document.createElement('img');
-                    изображение.src = читатель.result;
-                    изображение.classList.add('изображение-фото');
-                    фотоИсполнителя.innerHTML = '';
-                    фотоИсполнителя.appendChild(изображение);
-                    const новоеПоле = document.createElement('input');
-                    новоеПоле.type = 'file';
-                    новоеПоле.accept = 'image/*';
-                    новоеПоле.classList.add('поле-загрузки-фото');
-                    новоеПоле.addEventListener('change', полеФото.dispatchEvent.bind(полеФото, new Event('change')));
-                    фотоИсполнителя.appendChild(новоеПоле);
-                };
-                читатель.readAsDataURL(файл);
-            });
+                try {
+                    await dbПоложить('photo', файл);
+                } catch (e) {
+                    console.warn('Не удалось сохранить фото:', e);
+                }
+                установитьФото(файл);
+                поле.value = '';
+            }
+
+            полеФото.addEventListener('change', () => обработатьФото(полеФото));
 
             // ── Инициализация ──
             (async () => {
@@ -1611,6 +1620,9 @@
                 await загрузитьПубличныйПлейлист();
                 // Локальные треки (загруженные админом в этом браузере) — дополняют список.
                 await загрузитьПлейлистИзХранилища();
+                // Восстановление сохранённого фото профиля.
+                const фотоБлоб = await dbПолучить('photo');
+                if (фотоБлоб) установитьФото(фотоБлоб);
                 отрисоватьПлейлист();
                 // Предзагрузка первого трека в плеер (без автоплея) — чтобы сразу было видно название.
                 if (плейлист.length > 0 && текущийИндекс === -1) {
