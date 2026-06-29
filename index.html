@@ -1232,37 +1232,75 @@
             let режимПовтора = false;
             let перемешанныйПорядок = [];
 
-            // ── Загрузка плейлиста из localStorage ──
-            function загрузитьПлейлистИзХранилища() {
-                const данные = localStorage.getItem(КЛЮЧ_ХРАНИЛИЩА);
-                if (данные) {
-                    try {
-                        const сохранённый = JSON.parse(данные);
-                        плейлист = сохранённый.map(трек => ({
-                            название: трек.название,
-                            url: трек.url,
-                            данные: трек.данные // base64 данные аудио
-                        }));
-                        // Восстанавливаем URL из base64 если оригинальный URL недоступен
-                        плейлист.forEach(трек => {
-                            if (!трек.url && трек.данные) {
-                                трек.url = трек.данные;
-                            }
-                        });
-                    } catch (e) {
-                        плейлист = [];
+            // ── IndexedDB для хранения аудио-блобов (лимит ~сотни МБ, вместо ~5 МБ в localStorage) ──
+            const ИМЯ_БД = 'aimuzyka_db';
+            const ХРАНИЛИЩЕ_БД = 'tracks';
+            let dbPromise = null;
+
+            function открытьБД() {
+                if (dbPromise) return dbPromise;
+                dbPromise = new Promise((resolve, reject) => {
+                    const req = indexedDB.open(ИМЯ_БД, 1);
+                    req.onupgradeneeded = () => {
+                        const db = req.result;
+                        if (!db.objectStoreNames.contains(ХРАНИЛИЩЕ_БД)) {
+                            db.createObjectStore(ХРАНИЛИЩЕ_БД, { keyPath: 'id' });
+                        }
+                    };
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => reject(req.error);
+                });
+                return dbPromise;
+            }
+
+            function dbПоложить(id, blob) {
+                return открытьБД().then(db => new Promise((res, rej) => {
+                    const tx = db.transaction(ХРАНИЛИЩЕ_БД, 'readwrite');
+                    tx.objectStore(ХРАНИЛИЩЕ_БД).put({ id, blob });
+                    tx.oncomplete = () => res();
+                    tx.onerror = () => rej(tx.error);
+                    tx.onabort = () => rej(tx.error);
+                }));
+            }
+
+            function dbПолучить(id) {
+                return открытьБД().then(db => new Promise((res, rej) => {
+                    const tx = db.transaction(ХРАНИЛИЩЕ_БД, 'readonly');
+                    const r = tx.objectStore(ХРАНИЛИЩЕ_БД).get(id);
+                    r.onsuccess = () => res(r.result ? r.result.blob : null);
+                    r.onerror = () => rej(r.error);
+                }));
+            }
+
+            // ── Загрузка плейлиста из хранилища ──
+            async function загрузитьПлейлистИзХранилища() {
+                const мета = localStorage.getItem(КЛЮЧ_ХРАНИЛИЩА);
+                if (!мета) return;
+                try {
+                    const сохранённый = JSON.parse(мета);
+                    for (const запись of сохранённый) {
+                        const blob = await dbПолучить(запись.id);
+                        if (blob) {
+                            плейлист.push({
+                                id: запись.id,
+                                название: запись.название,
+                                url: URL.createObjectURL(blob)
+                            });
+                        }
                     }
+                } catch (e) {
+                    плейлист = [];
                 }
             }
 
-            // ── Сохранение плейлиста в localStorage ──
+            // ── Сохранение метаданных плейлиста (только id + название) ──
             function сохранитьПлейлистВХранилище() {
-                const дляСохранения = плейлист.map(трек => ({
-                    название: трек.название,
-                    url: трек.url,
-                    данные: трек.данные || трек.url // Сохраняем как есть
-                }));
-                localStorage.setItem(КЛЮЧ_ХРАНИЛИЩА, JSON.stringify(дляСохранения));
+                const мета = плейлист.map(трек => ({ id: трек.id, название: трек.название }));
+                try {
+                    localStorage.setItem(КЛЮЧ_ХРАНИЛИЩА, JSON.stringify(мета));
+                } catch (e) {
+                    console.warn('Не удалось сохранить метаданные:', e);
+                }
             }
 
             // ── Форматирование времени ──
@@ -1331,25 +1369,23 @@
                 }
             }
 
-            // ── Загрузка файла как base64 ──
-            function файлВBase64(файл) {
-                return new Promise((resolve, reject) => {
-                    const читатель = new FileReader();
-                    читатель.onload = () => resolve(читатель.result);
-                    читатель.onerror = reject;
-                    читатель.readAsDataURL(файл);
-                });
-            }
-
-            // ── Добавление треков ──
+            // ── Добавление треков (Blob сохраняется в IndexedDB) ──
             async function добавитьТреки(файлы) {
                 for (const файл of файлов) {
-                    if (!файл.type.startsWith('audio/')) continue;
-                    const base64 = await файлВBase64(файл);
+                    const isAudio = файл.type.startsWith('audio/')
+                        || /\.(mp3|wav|ogg|flac|m4a|aac|opus|webm)$/i.test(файл.name);
+                    if (!isAudio) continue;
+                    const id = 't_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                    try {
+                        await dbПоложить(id, файл);
+                    } catch (e) {
+                        alert('Не удалось сохранить трек «' + файл.name + '». Возможно, превышен лимит хранилища.');
+                        continue;
+                    }
                     плейлист.push({
+                        id,
                         название: файл.name.replace(/\.[^.]+$/, ''),
-                        url: base64,
-                        данные: base64
+                        url: URL.createObjectURL(файл)
                     });
                 }
                 сохранитьПлейлистВХранилище();
@@ -1420,7 +1456,12 @@
                     return;
                 }
                 const файлы = Array.from(полеФайла.files);
-                await добавитьТреки(файлы);
+                if (файлы.length === 0) return;
+                try {
+                    await добавитьТреки(файлы);
+                } catch (e) {
+                    alert('Ошибка при загрузке треков: ' + e.message);
+                }
                 полеФайла.value = '';
             });
 
@@ -1520,8 +1561,10 @@
             });
 
             // ── Инициализация ──
-            загрузитьПлейлистИзХранилища();
-            отрисоватьПлейлист();
+            (async () => {
+                await загрузитьПлейлистИзХранилища();
+                отрисоватьПлейлист();
+            })();
         })();
     </script>
 </body>
