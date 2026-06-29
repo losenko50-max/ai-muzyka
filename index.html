@@ -1615,7 +1615,7 @@
             // Центральное фото из репозитория (photo.jpg) — видят все посетители.
             async function загрузитьЦентральноеФото() {
                 try {
-                    const resp = await fetch('photo.jpg', { cache: 'no-store' });
+                    const resp = await fetch('photo.png', { cache: 'no-store' });
                     if (!resp.ok) return null;
                     const blob = await resp.blob();
                     if (blob.size === 0) return null;
